@@ -266,7 +266,33 @@
   [data-theme="pink"] .btn-primary:hover { background: #e60073; border-color: #e60073; }
   [data-theme="pink"] .btn-ghost { background: #fff0f8; border: 1px solid #FF99FF; color: #a21c5f; }
   [data-theme="pink"] .btn-ghost:hover { background: #ffe4f4; }
-  [data-theme="pink"] .rel, [data-theme="pink"] .folder, [data-theme="pink"] .results, [data-theme="pink"] .dropzone { background: #ffffff; border-color: #ffd6ed; color: #4a044e; }
+  [data-theme="pink"] .btn-danger { background: #fff; border-color: #FF99FF; color: #c0267a; }
+  [data-theme="pink"] .btn-danger:hover { background: #ffe4f4; }
+
+  /* FIX: relationships were invisible because .name/.meta stayed white on white */
+  [data-theme="pink"] .list { background: transparent; }
+  [data-theme="pink"] .rel {
+    background: #ffffff;
+    border-color: #FF99FF;
+    border-left-width: 4px;
+    color: #4a044e;
+  }
+  [data-theme="pink"] .rel:hover { background: #fff0f8; border-color: #FF99FF; }
+  [data-theme="pink"] .rel.active {
+    background: #FF3399;
+    border-color: #FF3399;
+    border-left-color: #7a0a3e;
+  }
+  [data-theme="pink"] .rel .name { color: #4a044e !important; }
+  [data-theme="pink"] .rel .meta { color: #c0267a !important; opacity: 1; }
+  [data-theme="pink"] .rel.active .name,
+  [data-theme="pink"] .rel.active .meta { color: #ffffff !important; }
+
+  [data-theme="pink"] .folder, [data-theme="pink"] .results, [data-theme="pink"] .dropzone {
+    background: #ffffff; border-color: #ffd6ed; color: #4a044e;
+  }
+  [data-theme="pink"] .folder.has { background: #ffe4f4; border-color: #FF3399; }
+  [data-theme="pink"] .folder-name { color: #4a044e !important; opacity: 1; }
   [data-theme="pink"] th { background: #ffe4f4; color: #9d174d; border-bottom-color: #FF99FF; }
   [data-theme="pink"] td { color: #5b215b; border-bottom-color: #ffe4f4; }
   [data-theme="pink"] input[type="text"], [data-theme="pink"] select, [data-theme="pink"] textarea { background: #ffffff; border-color: #FF99FF; color: #4a044e; }
@@ -354,7 +380,8 @@
       </div>
 
       <div class="notice">
-        🔒 <div><strong>Local only.</strong> We read and write directly on your device using the File System Access API. Nothing is uploaded anywhere.</div>
+        🔒 <div><strong>Local only.</strong> We read and write directly on your device using the File System Access API. Nothing is uploaded anywhere.<br>
+<strong>Click on 'Updates'</strong>; and you may skip after the dry run. </div>
       </div>
 
       <div class="actions">
@@ -410,6 +437,8 @@
   const modePill = $('#mode-pill');
   const c = { copy: $('#c-copy'), update: $('#c-update'), mkdir: $('#c-mkdir'), delete: $('#c-delete'), skip: $('#c-skip') };
   const progressWrap = $('#progress-wrap'), progressBar = $('#progress-bar'), progressText = $('#progress-text');
+  const badgeUpdate = document.querySelector('.b-update');
+  if (badgeUpdate) { badgeUpdate.style.cursor = 'pointer'; badgeUpdate.title = 'Click to skip/restore all UPDATEs'; }
 
   let relationships = JSON.parse(localStorage.getItem('folderSync.relationships') || '[]');
   let currentId = null;
@@ -695,7 +724,7 @@
       renderActions(actions, skipCount);
       setProgress(100, 'Done'); setTimeout(()=>setProgress(null), 800); toast('Dry run complete','ok');
     }catch(e){ console.error(e); toast(e.message||'Scan failed','err'); }
-    finally{ btnDry.disabled=false; btnSync.disabled = lastActions.length===0; btnDeletes.disabled = lastActions.filter(a=>a.type==='DELETE').length===0; }
+    finally{ btnDry.disabled=false; btnSync.disabled = lastActions.length===0; btnDeletes.disabled = lastActions.filter(a=>a.type==='DELETE').length===0; const hasUpdates = lastActions.some(a=>a.type==='UPDATE'); if (badgeUpdate){ badgeUpdate.style.pointerEvents = hasUpdates ? 'auto' : 'none'; badgeUpdate.style.opacity = hasUpdates ? '1' : '0.4'; } }
   }
 
   async function syncNow(){
@@ -751,9 +780,7 @@
           done++; const shortPath = a.path.length > 35 ? '…'+a.path.slice(-32) : a.path; setProgress(5 + (done/total)*90, `${done}/${total} — ${a.type} — ${shortPath}`);
         }catch(err){ if (err.name === 'NotFoundError') { console.warn('Skipped (gone):', a.path); toast(`Skipped — ${a.path} disappeared`,'info',2000); } else { console.error('Action failed', a, err); toast(`Failed: ${a.path}`,'err',2500); } }
       }
-      const wasCancelled = isCancelled; btnPause.disabled = true; btnCancel.disabled = true; isPaused = false; isCancelled = false; if (!wasCancelled) { setProgress(100, 'Sync complete'); setTimeout(()=>setProgress(null), 1000); toast(`Sync finished — ${done} changes applied`,'ok'); } else { setProgress(null); toast(`Sync cancelled — ${done} changes applied`,'info'); }
-      // skip auto rescan – user can click Dry Run if needed (saves a full second scan)
-      // await dryRun(); // refresh view
+      const wasCancelled = isCancelled; btnPause.disabled = true; btnCancel.disabled = true; isPaused = false; isCancelled = false; if (!wasCancelled) { setProgress(100, 'Sync complete'); setTimeout(()=>setProgress(null), 1000); toast(`Sync finished — ${done} changes applied`,'ok'); await dryRun(); } else { setProgress(null); toast(`Sync cancelled — ${done} changes applied`,'info'); }
     }catch(e){ console.error(e); toast(e.message||'Sync failed','err'); }
     finally{ btnDry.disabled=false; btnSync.disabled=false; }
   }
@@ -786,6 +813,26 @@
       btnDeletes.dataset.mode = 'all';
     }
   };
+
+  function toggleSkipUpdates(){
+    const updates = lastActions.filter(a => a.type==='UPDATE' || a._wasUpdate);
+    if (!updates.length) { toast('No updates to toggle','info'); return; }
+    const skipping = !lastActions.some(a => a._wasUpdate);
+    lastActions.forEach(a => {
+      if (a.type === 'UPDATE' && skipping) {
+        a._wasUpdate = true;
+        a.type = 'SKIP';
+      } else if (a.type === 'SKIP' && a._wasUpdate && !skipping) {
+        a.type = 'UPDATE';
+        delete a._wasUpdate;
+      }
+    });
+    renderActions(lastActions, window._lastSkipCount||0);
+    if (badgeUpdate) { badgeUpdate.style.opacity = skipping ? '0.55' : '1'; }
+    toast(skipping ? 'Updates skipped — copying new files only' : 'Updates restored', 'info', 1800);
+    btnSync.disabled = lastActions.filter(a=>a.type!=='SKIP').length===0;
+  }
+  if (badgeUpdate) { badgeUpdate.onclick = toggleSkipUpdates; }
 
   function escape(s){ return s.replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m])); }
 
